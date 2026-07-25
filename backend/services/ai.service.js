@@ -1,15 +1,25 @@
-const { PDFParse } = require('pdf-parse');
+const pdfParse = require('pdf-parse');
 const { GoogleGenAI } = require('@google/genai');
 
 const analyzeResumePDF = async (fileBuffer, targetRole = 'General') => {
-  const parser = new PDFParse({ data: fileBuffer });
-  const parsedPdf = await parser.getText();
-  await parser.destroy();
+  let resumeText = '';
 
-  const resumeText = parsedPdf.text.slice(0, 15000);
+  try {
+    // 1. Extract raw text from PDF Buffer
+    const pdfData = await pdfParse(fileBuffer);
+    resumeText = pdfData.text ? pdfData.text.slice(0, 15000) : '';
+  } catch (pdfErr) {
+    console.error('❌ PDF Text Extraction Error:', pdfErr.message);
+    throw new Error('Failed to read content from the uploaded PDF file.');
+  }
 
   if (!resumeText || resumeText.trim().length < 30) {
-    throw new Error('Could not extract readable text from this PDF.');
+    throw new Error('Could not extract readable text from this PDF. Please ensure it is not an image scan.');
+  }
+
+  // 2. Check for Gemini API key
+  if (!process.env.GEMINI_API_KEY) {
+    throw new Error('Server misconfiguration: Missing GEMINI_API_KEY environment variable.');
   }
 
   const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
@@ -35,25 +45,35 @@ const analyzeResumePDF = async (fileBuffer, targetRole = 'General') => {
     ${resumeText}
   `;
 
-  const response = await ai.models.generateContent({
-    model: 'gemini-2.5-flash',
-    contents: prompt,
-    config: { responseMimeType: 'application/json' },
-  });
+  try {
+    const response = await ai.models.generateContent({
+      model: 'gemini-2.5-flash',
+      contents: prompt,
+      config: { responseMimeType: 'application/json' },
+    });
 
-  const parsed = JSON.parse(response.text);
+    let rawText = response.text || '';
 
-  return {
-    targetRole,
-    atsScore: Math.max(0, Math.min(100, Math.round(parsed.atsScore ?? 0))),
-    summary: parsed.summary || '',
-    strengths: Array.isArray(parsed.strengths) ? parsed.strengths : [],
-    improvementAreas: Array.isArray(parsed.improvementAreas) ? parsed.improvementAreas : [],
-    missingKeywords: Array.isArray(parsed.missingKeywords) ? parsed.missingKeywords : [],
-    formattingIssues: Array.isArray(parsed.formattingIssues) ? parsed.formattingIssues : [],
-    actionableTips: Array.isArray(parsed.actionableTips) ? parsed.actionableTips : [],
-    finalRecommendation: parsed.finalRecommendation || '',
-  };
+    // Strip markdown JSON code block formatting if present
+    rawText = rawText.replace(/```json/gi, '').replace(/```/g, '').trim();
+
+    const parsed = JSON.parse(rawText);
+
+    return {
+      targetRole,
+      atsScore: Math.max(0, Math.min(100, Math.round(parsed.atsScore ?? 0))),
+      summary: parsed.summary || '',
+      strengths: Array.isArray(parsed.strengths) ? parsed.strengths : [],
+      improvementAreas: Array.isArray(parsed.improvementAreas) ? parsed.improvementAreas : [],
+      missingKeywords: Array.isArray(parsed.missingKeywords) ? parsed.missingKeywords : [],
+      formattingIssues: Array.isArray(parsed.formattingIssues) ? parsed.formattingIssues : [],
+      actionableTips: Array.isArray(parsed.actionableTips) ? parsed.actionableTips : [],
+      finalRecommendation: parsed.finalRecommendation || '',
+    };
+  } catch (aiErr) {
+    console.error('❌ Gemini Analysis Error:', aiErr.message);
+    throw new Error(`AI Analysis failed: ${aiErr.message}`);
+  }
 };
 
 module.exports = { analyzeResumePDF };
