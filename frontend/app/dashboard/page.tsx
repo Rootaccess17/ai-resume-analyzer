@@ -32,7 +32,6 @@ export default function DashboardPage() {
   };
 
   useEffect(() => {
-    // Moved inside useEffect to satisfy ESLint dependency rules
     const fetchHistory = async () => {
       setLoadingHistory(true);
       try {
@@ -67,7 +66,9 @@ export default function DashboardPage() {
       const { data } = await API.post('/resume/upload', formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
-      setResult(data.data);
+      // Safely extract result regardless of backend wrapper structure
+      const analysisResult = data.data || data.scan || data;
+      setResult(analysisResult);
     } catch (err: any) {
       alert(err?.response?.data?.message || 'Analysis failed');
     } finally {
