@@ -1,25 +1,49 @@
-const pdfParse = require('pdf-parse');
+const pdfParseModule = require('pdf-parse');
 const { GoogleGenAI } = require('@google/genai');
+
+/**
+ * Robust helper function to extract text from PDF buffer
+ * supporting pdf-parse v1 (function), v2 (class/object), or default export.
+ */
+const extractTextFromPDF = async (fileBuffer) => {
+  // 1. Check for pdf-parse v2 class structure
+  if (pdfParseModule.PDFParse) {
+    const parser = new pdfParseModule.PDFParse({ data: fileBuffer });
+    const result = await parser.getText();
+    if (parser.destroy) await parser.destroy();
+    return result.text;
+  }
+
+  // 2. Check for pdf-parse v1 direct function or default function
+  const parseFn = typeof pdfParseModule === 'function' 
+    ? pdfParseModule 
+    : pdfParseModule.default;
+
+  if (typeof parseFn === 'function') {
+    const data = await parseFn(fileBuffer);
+    return data.text;
+  }
+
+  throw new Error('Unsupported pdf-parse module structure.');
+};
 
 const analyzeResumePDF = async (fileBuffer, targetRole = 'General') => {
   let resumeText = '';
 
   try {
-    // 1. Extract raw text from PDF Buffer
-    const pdfData = await pdfParse(fileBuffer);
-    resumeText = pdfData.text ? pdfData.text.slice(0, 15000) : '';
+    const rawText = await extractTextFromPDF(fileBuffer);
+    resumeText = rawText ? rawText.slice(0, 15000) : '';
   } catch (pdfErr) {
     console.error('❌ PDF Text Extraction Error:', pdfErr.message);
-    throw new Error('Failed to read content from the uploaded PDF file.');
+    throw new Error('Failed to read content from the uploaded PDF file. Please upload a non-scanned PDF.');
   }
 
   if (!resumeText || resumeText.trim().length < 30) {
-    throw new Error('Could not extract readable text from this PDF. Please ensure it is not an image scan.');
+    throw new Error('Could not extract readable text from this PDF.');
   }
 
-  // 2. Check for Gemini API key
   if (!process.env.GEMINI_API_KEY) {
-    throw new Error('Server misconfiguration: Missing GEMINI_API_KEY environment variable.');
+    throw new Error('Server setup error: Missing GEMINI_API_KEY environment variable.');
   }
 
   const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
@@ -30,16 +54,16 @@ const analyzeResumePDF = async (fileBuffer, targetRole = 'General') => {
 
     Analyze the resume text below and return STRICT JSON only, matching this exact structure:
     {
-      "atsScore": 0-100 integer,
+      "atsScore": 85,
       "summary": "2-3 sentence overview of ATS readiness for a ${targetRole} position",
-      "strengths": ["array of 3-5 specific strengths relevant to ${targetRole}"],
-      "improvementAreas": ["array of 3-5 specific weaknesses or gaps for ${targetRole}"],
-      "missingKeywords": ["array of 5-8 keywords/skills expected for ${targetRole} but missing"],
-      "formattingIssues": ["array of 2-5 formatting/structure problems found"],
-      "actionableTips": ["array of 3-5 short, concrete, actionable improvement steps"],
-      "finalRecommendation": "1-2 sentence final verdict — is this resume ready for ${targetRole} roles or not, and why"
+      "strengths": ["strength 1", "strength 2"],
+      "improvementAreas": ["improvement 1", "improvement 2"],
+      "missingKeywords": ["keyword 1", "keyword 2"],
+      "formattingIssues": ["formatting 1"],
+      "actionableTips": ["tip 1", "tip 2"],
+      "finalRecommendation": "1-2 sentence final recommendation"
     }
-    Do not include markdown, backticks, or any text outside the JSON object.
+    Do not include markdown code block formatting or backticks outside the JSON.
 
     Resume Text:
     ${resumeText}
@@ -53,8 +77,6 @@ const analyzeResumePDF = async (fileBuffer, targetRole = 'General') => {
     });
 
     let rawText = response.text || '';
-
-    // Strip markdown JSON code block formatting if present
     rawText = rawText.replace(/```json/gi, '').replace(/```/g, '').trim();
 
     const parsed = JSON.parse(rawText);
