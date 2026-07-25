@@ -31,19 +31,20 @@ export default function DashboardPage() {
     router.push('/login');
   };
 
-  const fetchHistory = async () => {
-    setLoadingHistory(true);
-    try {
-      const { data } = await API.get('/resume/history');
-      setHistory(data);
-    } catch {
-      alert('Could not load history');
-    } finally {
-      setLoadingHistory(false);
-    }
-  };
-
   useEffect(() => {
+    // Moved inside useEffect to satisfy ESLint dependency rules
+    const fetchHistory = async () => {
+      setLoadingHistory(true);
+      try {
+        const { data } = await API.get('/resume/history');
+        setHistory(data);
+      } catch {
+        alert('Could not load history');
+      } finally {
+        setLoadingHistory(false);
+      }
+    };
+
     if (view === 'history') fetchHistory();
   }, [view]);
 
